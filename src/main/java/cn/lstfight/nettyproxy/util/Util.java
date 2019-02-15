@@ -15,7 +15,7 @@ public class Util {
      * @param request
      * @return split[0]host split[1]port
      */
-    public static String[] getHostAndIp(HttpRequest request) {
+    public static String[] getHostAndPort(HttpRequest request) {
         if (null == request) {
             return null;
         }

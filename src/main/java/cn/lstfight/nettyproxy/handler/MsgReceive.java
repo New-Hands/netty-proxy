@@ -1,12 +1,15 @@
 package cn.lstfight.nettyproxy.handler;
 
 import cn.lstfight.nettyproxy.util.Util;
+import com.google.common.primitives.Ints;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.*;
 import io.netty.util.ReferenceCountUtil;
+
+import java.util.List;
 
 /**
  * <p>客户请求处理handler</p>
@@ -29,59 +32,58 @@ public class MsgReceive extends SimpleChannelInboundHandler<HttpObject> {
 
             Object msgData = msg;
             //与真实主机建立连接
-            String[] hostAndIp = Util.getHostAndIp(request);
-            if (null == hostAndIp) {
+            String[] hostAndPort = Util.getHostAndPort(request);
+            if (null == hostAndPort || "clients1.google.com".equals(hostAndPort[0])) {
                 ReferenceCountUtil.release(msg);
                 ctx.close();
                 return;
             }
             if (request.method().equals(HttpMethod.CONNECT)) {
-                System.out.println("connect:"+hostAndIp[0]+";"+request.uri());
+                System.out.println("connect:"+hostAndPort[0]+";"+request.uri());
                 //连接目标主机
-                ChannelFuture future = proxyConnect(hostAndIp[0], Integer.parseInt(hostAndIp[1]), ctx, msgData);
-                future.addListener(new ChannelFutureListener() {
+                ChannelFuture connectFuture = proxyConnect(hostAndPort[0], Integer.parseInt(hostAndPort[1]), ctx, msgData);
+                connectFuture.addListener(new ChannelFutureListener() {
                     @Override
-                    public void operationComplete(ChannelFuture future) throws Exception {
-                        if (!future.isSuccess()) {
-                            System.out.println(future.channel().remoteAddress()+"连接建立失败！");
+                    public void operationComplete(ChannelFuture remoteFuture) throws Exception {
+                        if (!remoteFuture.isSuccess()) {
+                            System.out.println(hostAndPort[0] + "连接建立失败！");
                             ctx.close();
-                            future.channel().close();
+                            remoteFuture.channel().close();
                             return;
                         }
                         HttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
                         //http数据转流数据
-                        EmbeddedChannel em = new EmbeddedChannel(new HttpRequestEncoder());
+                        EmbeddedChannel em = new EmbeddedChannel(new HttpResponseEncoder());
                         em.writeOutbound(response);
                         Object data = em.readOutbound();
-                        ctx.writeAndFlush(data).addListener(new ChannelFutureListener() {
+                        ctx.channel().writeAndFlush(data).addListener(new ChannelFutureListener() {
                             @Override
                             public void operationComplete(ChannelFuture future) throws Exception {
                                 if (!future.isSuccess()) {
                                     ctx.close();
-                                    future.cancel(true);
+                                    //future.cancel(true);
                                 }
                             }
                         });
 
                         //改变处理器
-                        ctx.pipeline().addLast(new MsgTransmit(future.channel()));
+                        pipeline.addLast(new MsgTransmit(remoteFuture.channel()));
                     }
                 });
             }else {
-                System.out.println(request.method()+":"+hostAndIp[0]+";"+request.uri());
+                System.out.println(request.method()+":"+hostAndPort[0]+";"+request.uri());
                 //http数据转换为流数据
                 EmbeddedChannel em = new EmbeddedChannel(new HttpRequestEncoder());
                 em.writeOutbound(request);
                 final Object data = em.readOutbound();
                 //建立客户-服务器 桥梁
-                ChannelFuture future = proxyConnect(hostAndIp[0], Integer.parseInt(hostAndIp[1]), ctx, msgData);
+                ChannelFuture future = proxyConnect(hostAndPort[0], Integer.parseInt(hostAndPort[1]), ctx, msgData);
                 future.addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {
                         if (!future.isSuccess()) {
-                            System.out.println(hostAndIp[0]+"连接建立失败！");
+                            System.out.println(hostAndPort[0]+"连接建立失败！");
                             ctx.close();
-                            future.channel().close();
                             return;
                         }
 
@@ -100,7 +102,7 @@ public class MsgReceive extends SimpleChannelInboundHandler<HttpObject> {
                 });
             }
         } else {
-            //不处理其他类型请求
+            //不处理其他类型请求 释放缓冲区数据
             ReferenceCountUtil.release(msg);
         }
     }

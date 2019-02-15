@@ -40,11 +40,8 @@ public class ProxyServer {
             System.out.println("proxy start listening：" + port);
             ChannelFuture bindFuture = serverBootstrap.bind(port).sync();
             bindFuture.channel().closeFuture().sync();
-
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-
     }
-
 }
